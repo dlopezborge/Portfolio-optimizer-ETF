@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Feb  6 21:00:04 2021
+
+@author: daniellopezborge
+"""
+
+import yfinance as yf
+import pandas_datareader.data as web
+import numpy as np
+import pandas as pd
+
+portfolio = ['MCRB','ZM','PACB','SE','AQB','ARCT','TSLA','TWST','EVGN','MTLS','DOCU','CSTL','TWLO','ROKU','FATE','SSYS','NTLA','PINS','TSM','CDNA','TDOC','NTDOY','PSNL','BIDU','SURF']
+weights_portf = np.asarray([0.15000, 0.08016, 0.07860, 0.07209, 0.07205, 0.06620, 0.05467, 0.04835, 0.04580, 0.03073, 0.02803, 0.02568, 0.02539, 0.02534, 0.02231, 0.02120, 0.01903, 0.01815, 0.01715, 0.01483, 0.01411, 0.01360, 0.01334, 0.01209, 0.01038])
+
+data = web.DataReader(portfolio,data_source='yahoo',start='01/01/2015')['Adj Close']
+
+data.sort_index(inplace=True)
+
+returns = data.pct_change()
+
+
+mean_daily_returns = returns.mean()
+cov_matrix = returns.cov()
+
+portfolio_return = round(np.sum(mean_daily_returns * weights_portf) * 252,2)
+
+portfolio_std_dev = round(np.sqrt(np.dot(weights_portf.T,np.dot(cov_matrix, weights_portf))) * np.sqrt(252),2)
+
+print('Portfolio expected annualised return is ' + str(portfolio_return) + ' with a standard deviation of ' + str(portfolio_std_dev))#' and volatility is {}').format(portfolio_return,portfolio_std_dev)
+
+"""
+Optimize ETFs
+"""
+
+etf = [('VGT','XLK','IYW','SKYY','IGV','SOXX','FTEC','IXN','SMH','CIBR','IBB','XBI','FBT','BBH','LABU','PBE','SBIO','IDNA','BIB','BTEC')]
+
+data_etf = yf.download('VGT XLK IYW SKYY IGV SOXX FTEC IXN SMH CIBR IBB XBI FBT BBH LABU PBE SBIO IDNA BIB BTEC', start="2019-06-17")['Adj Close']
+
+#data_etf = web.DataReader(etf,data_source='yahoo',start='01/01/2015')['Adj Close']
+
+data_etf.sort_index(inplace=True)
+
+etf_returns = data_etf.pct_change()
+etf_returns = etf_returns.dropna()
+
+
+
+etf_cov_matrix = etf_returns.cov()
+
+mu_etf = etf_returns.mean() * 252
+
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt import risk_models
+from pypfopt import expected_returns
+
+sigma = etf_returns.std()
+variance = etf_returns.var()
+
+#we calculate the covariance matrix
+cov_matrix = etf_returns.cov() *252
+
+
+#calculate correlation matrix
+corr_matrix = etf_returns.corr()
+
+S_etf = risk_models.sample_cov(etf_returns)
+
+
+#Maximizing for Sharpe
+ef = EfficientFrontier(mu_etf, S_etf)
+weights = ef.max_sharpe()
+cleaned_weights = ef.clean_weights()
+print(cleaned_weights)
+ef.portfolio_performance(verbose=True)
+###filter it down to 25 stocks
+df_etf = pd.DataFrame.from_dict(data=cleaned_weights, orient='index')
+df_etf.columns = ['Weight']
+df_etf = df_etf.nlargest(5, 'Weight')
+
+#chose FTEC, BIB, PBE, CIBR, IDNA
+chosen_etf = [('FTEC', 'BIB', 'PBE', 'CIBR', 'IDNA')]
+data_chosen = yf.download('FTEC BIB PBE CIBR IDNA', start="2019-06-17")['Adj Close']
+data_chosen.sort_index(inplace=True)
+chosen_returns = data_chosen.pct_change().dropna()
+chosen_cov = chosen_returns.cov()
+mu_chosen = chosen_returns.mean() *252
+sigma_chosen = chosen_returns.std()
+var_chosen = chosen_returns.var()
+chosen_cov = chosen_returns.cov()*252
+chosen_corr = chosen_returns.corr()
+
+ef_chosen = EfficientFrontier(mu_chosen, chosen_cov, weight_bounds=(0.1,0.5))
+weights_chosen = ef_chosen.max_sharpe()
+cleaned_chosen = ef_chosen.clean_weights()
+
+print(cleaned_chosen)
+ef_chosen.portfolio_performance(verbose=True)
+sharpe_array_chosen = mu_chosen / sigma_chosen
+
+
+#fix money by weighting this portfolio with stocks
+money = 10000
+
+from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+latest_prices = get_latest_prices(data_chosen)
+da = DiscreteAllocation(weights_chosen, latest_prices, total_portfolio_value=money)
+allocation, leftover = da.lp_portfolio()
+print("Discrete allocation:", allocation)
+print("Funds remaining: ${:.2f}".format(leftover))
+
+"""
+Allocation ETF complete, Allocation stocks complete
+now merge both "assets"
+"""
+
+
+
+
+
+
+
